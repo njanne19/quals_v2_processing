@@ -26,7 +26,8 @@ from plotting import (
     plot_trial_list, 
     plot_calibration_results_for_batch_and_individual, 
     plot_main_load_schedule, 
-    plot_average_trajectories_single_participant
+    plot_average_trajectories_single_participant, 
+    plot_average_trajectories_single_participant_for_paper
 )
 import multiprocessing
 from tqdm import tqdm 
@@ -51,11 +52,13 @@ def main():
     # Default config if no file specified
     default_config = {
         'dataset_dir': Path(__file__).parent.parent / 'datasets', 
-        'dataset_name' : 'mar27_02',
+        'dataset_name' : 'apr_15',
         'participants' : [
-            'Mark_Mar27', 
-            'Hannah_B_Mar27', 
-            'Nick_Mar26_TestProc',
+            # 'Mark_Mar27', 
+            # 'Hannah_B_Mar27', 
+            # 'Nick_Mar26_TestProc',
+            'Tobi_Farbstein_Apr15', 
+            'Andrew_Memmer_Apr15',
         ]
     }
     
@@ -178,142 +181,58 @@ def main():
         print(f"Number of trials visible: {num_trials_visible}")
         print(f"Loads: {loads}")
 
-        plot_main_load_schedule(results[participant]['main']['runs'])
-        # plot_single_trial(results[participant]['main']['runs'][54])
-        estimate_average_trajectories_single_participant(results[participant], 'main')
-        plot_average_trajectories_single_participant(results[participant])
-        plot_trial_list(results[participant]['main']['runs'], title=f'{participant} Main Runs', show_outliers=True, just_outliers=True)
-        plt.show()
+        # Create a folder for this participant in the results directory
+        participant_results_dir = os.path.join('results', participant)
+        if not os.path.exists(participant_results_dir):
+            os.makedirs(participant_results_dir)
+
+        # Plot and save calibration results
+        fig_calibration_results, _ = plot_calibration_results_for_batch_and_individual(
+            calibration_results, 
+            results[participant]['main']['runs'], 
+            title=f'{participant} Calibration Results',
+            save_fig=True,
+            save_path=os.path.join(participant_results_dir, 'calibration_results.png')
+        )
+        plt.close(fig_calibration_results)
             
+        # Plot and save main load schedule
+        fig_load_schedule, _ = plot_main_load_schedule(
+            results[participant]['main']['runs'], 
+            title=f'{participant} Main Load Schedule',
+            save_fig=True,
+            save_path=os.path.join(participant_results_dir, 'main_load_schedule.png')
+        )
+        plt.close(fig_load_schedule)
         
+        
+        # Estimate average trajectories
+        estimate_average_trajectories_single_participant(results[participant], 'main', use_corrected_outliers=True)
+        
+        # Estimate virtual trajectories (commented out in original code)
+        # estimate_virtual_trajectories_single_participant(results[participant], 'main', use_corrected_outliers=True)
+        
+        # Plot and save average trajectories for paper
+        fig_avg_trajectories = plot_average_trajectories_single_participant_for_paper(
+            results[participant],
+            save_fig=True,
+            save_path=os.path.join(participant_results_dir, 'average_trajectories.png')
+        )
+        plt.close(fig_avg_trajectories)
+        
+        # Plot and save trial list
+        fig_trial_list, _ = plot_trial_list(
+            results[participant]['main']['runs'], 
+            title=f'{participant} Main Runs', 
+            show_outliers=True, 
+            just_outliers=False,
+            save_fig=True,
+            save_path=os.path.join(participant_results_dir, 'trial_list.png')
+        )
+        plt.close(fig_trial_list)
+            
 
     return 
-        
-    task_list = [] 
-    
-    for trial_participant_dir in trial_participant_dirs: 
-        base_name = os.path.basename(trial_participant_dir) 
-        results[base_name] = {
-            'basepath': trial_participant_dir, 
-        }
-        
-        calibration_files = glob.glob(os.path.join(trial_participant_dir, 'calibration', '*.csv'))
-        results[base_name]['num_calibration_runs'] = len(calibration_files)
-        results[base_name]['calibration_files'] = calibration_files
-        results[base_name]['calibration'] = {}
-
-        main_files = glob.glob(os.path.join(trial_participant_dir, 'main', '*.csv'))
-        results[base_name]['num_main_runs'] = len(main_files)
-        results[base_name]['main_files'] = main_files
-        results[base_name]['main'] = {}
-        # Now we want to create a task list for each of the calibration files 
-        for idx, file in enumerate(calibration_files): 
-            task_list.append((base_name, 'calibration', file, idx))
-
-        # Now we want to create a task list for each of the main files 
-        for idx, file in enumerate(main_files): 
-            task_list.append((base_name,'main', file, idx))
-    
-   
-    # Then we iterate over the task list and process the data in parallel 
-    # the task list partially reveals where the data should go in the results directory 
-    # use multiprocessing to process the data in parallel
-    print(f"Processing {len(task_list)} tasks")
-    with multiprocessing.Pool(os.cpu_count()-1) as pool:
-        with tqdm(total=len(task_list)) as pbar:
-            for (base_name, task_type, idx), value in pool.imap_unordered(execute_processing_task, task_list):
-                results[base_name][task_type][idx] = value
-                pbar.update()
-
-    print(f"Completed processing {len(task_list)} tasks")
-                
-    # Then from this list of final results, 
-    # plot me a random calibration run. Show the file where it came from, 
-    # all trials included in the calibration run. 
-    # Pick a random participant and calibration run to plot
-    # plot_calibration_results_for_paper(results)
-    
-    # Choose a random participant and plot all their main trials 
-    random_participant = np.random.choice(list(results.keys()))
-    # plot_main_trial_position_and_grip(results, random_participant)
-    # plot_calibration_results_and_trials(results, random_participant)
-    # plot_calibration_results_for_paper(results)
-    # plot_main_trial_position_and_grip(results, 'Dev-Nov21')
-    # plot_virtual_trajectories_for_paper(results, 'Dev-Nov21')
-    plot_virtual_trajectory_results_for_paper(results)
-    # for participant in results.keys():
-        # plot_virtual_trajectories_for_paper(results, participant)
-        # plot_calibration_results_and_trials(results, participant)
-    # plot_virtual_trajectories_for_paper(results, 'Dev-Nov21')
-    # plt.show()
-    
-    # if results[random_participant]['main']:
-    #     num_runs = len(results[random_participant]['main'])
-        
-    #     # Create figure with 5 rows (schedule + 4 time series) and num_runs columns
-    #     fig, axes = plt.subplots(5, num_runs, figsize=(6*num_runs, 12), height_ratios=[1, 1, 1, 1, 1])
-    #     if num_runs == 1:
-    #         axes = axes.reshape(-1, 1)
-    #     fig.suptitle(f'Main Trial Analysis\nParticipant: {random_participant}')
-        
-    #     # Process each run in its own column
-    #     for run_idx in range(num_runs):
-    #         main_data = results[random_participant]['main'][run_idx]
-            
-    #         # Create schedule plot
-    #         load_map_numeric = {
-    #             'very_light': 1,
-    #             'light': 2, 
-    #             'medium': 3,
-    #             'moderately_heavy': 4,
-    #             'heavy': 5
-    #         }
-            
-    #         unique_loads = list(set(trial['load'] for trial in main_data['trials'].values()))
-    #         colors = plt.cm.rainbow(np.linspace(0, 1, len(main_data['trials'])))
-            
-    #         # Plot schedule
-    #         for trial_idx, trial_data in main_data['trials'].items():
-    #             load = trial_data['load']
-    #             load_level = load_map_numeric[load]
-    #             marker = 'x' if not trial_data['is_valid'] else 'o'
-    #             axes[0,run_idx].scatter(trial_idx, load_level, color=colors[trial_idx], s=100, marker=marker)
-                
-    #         axes[0,run_idx].set_yticks(range(1,6))
-    #         axes[0,run_idx].set_yticklabels(['Very Light', 'Light', 'Medium', 'Moderately Heavy', 'Heavy'])
-    #         axes[0,run_idx].set_xlabel('Trial Number')
-    #         axes[0,run_idx].set_title(f'Run {run_idx} Schedule')
-            
-    #         # Plot time series for all trials
-    #         for trial_idx, trial_data in main_data['trials'].items():
-    #             df = trial_data['data']
-    #             time = df['elapsed_time']
-    #             color = colors[trial_idx]
-    #             linestyle = '--' if not trial_data['is_valid'] else '-'
-                
-    #             # Plot encoder position
-    #             axes[1,run_idx].plot(time, df['EncoderRadians'], c=color, alpha=0.7, linestyle=linestyle)
-    #             axes[1,run_idx].set_ylabel('Position (rad)')
-                
-    #             # Plot encoder velocity  
-    #             axes[2,run_idx].plot(time, df['EncoderRadians_dot_smooth'], c=color, alpha=0.7, linestyle=linestyle)
-    #             axes[2,run_idx].set_ylabel('Velocity (rad/s)')
-                
-    #             # Plot grip force
-    #             axes[3,run_idx].plot(time, df['GripForce'], c=color, alpha=0.7, linestyle=linestyle)
-    #             axes[3,run_idx].set_ylabel('Grip Force (N)')
-                
-    #             # Plot command torque
-    #             axes[4,run_idx].plot(time, df['CommandTorque'], c=color, alpha=0.7, linestyle=linestyle)
-    #             axes[4,run_idx].set_ylabel('Command Torque (Nm)')
-    #             axes[4,run_idx].set_xlabel('Time (s)')
-            
-    #         # Add grid to all plots in this column
-    #         for ax in axes[:,run_idx]:
-    #             ax.grid(True, alpha=0.3)
-                
-    #     plt.tight_layout()
-    #     plt.show()
 
     
 

@@ -65,7 +65,7 @@ def split_runs_into_trial_types(runs: dict) -> dict:
     
     return results
 
-def estimate_average_trajectories_single_participant(results_dict, task: str): 
+def estimate_average_trajectories_single_participant(results_dict, task: str, use_corrected_outliers: bool = False): 
     """
     Estimate the average trajectories for a single participant. 
     """
@@ -76,14 +76,21 @@ def estimate_average_trajectories_single_participant(results_dict, task: str):
         # First we get the average trial from all the non-outlier trials. 
         trajectory_dict = {}
         for run in results_dict['main']['runs']: 
-            if run.is_outlier(): 
+            # Skip any uncorrected outliers
+            if run.is_outlier() and not run.is_corrected_outlier():
                 continue
-            else:
+            
+            # If we're using corrected outliers, include them; otherwise skip all outliers
+            if use_corrected_outliers or not run.is_outlier():
                 load = run.get_load()
                 catch_trial = run.is_catch_trial()
                 loads_visible = run.is_load_visible()
                 # Create a composite key that includes load, catch trial status, and visibility
-                key = f"{load}_{'catch' if catch_trial else 'normal'}_{'visible' if loads_visible else 'hidden'}"
+                if catch_trial and loads_visible and load == 0.3: 
+                    print(f"Found first medium catch trial with visible load.") 
+                    key = 'first_medium_catch_visible'
+                else: 
+                    key = f"{load}_{'catch' if catch_trial else 'normal'}_{'visible' if loads_visible else 'hidden'}"
                 if key not in trajectory_dict: 
                     trajectory_dict[key] = []
                 trajectory_dict[key].append(run)

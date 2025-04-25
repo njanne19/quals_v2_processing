@@ -7,13 +7,21 @@ from scipy.integrate import solve_ivp
 from scipy.signal import savgol_filter
 from functools import partial
 from TrialData import MainTrial, CalibrationTrial
-def plot_trial_list(trial_list, title=None, show_outliers=False, just_outliers=False):
+def plot_trial_list(trial_list, title=None, show_outliers=False, just_outliers=False, save_fig=False, save_path=None):
     """
     Plot multiple trials overlaid on the same subplots.
     Each trial dataframe contains elapsed_time and sensor data columns.
     When show_outliers=True, outliers are red and valid trials are gray.
     When show_outliers=False, each trial gets a unique color.
     When just_outliers=True, only outlier trials are shown.
+    
+    Args:
+        trial_list: List of trial dataframes to plot
+        title: Optional title for the figure
+        show_outliers: Whether to highlight outliers in red
+        just_outliers: Whether to only show outlier trials
+        save_fig: Whether to save the figure
+        save_path: Path to save the figure if save_fig is True
     """
     # Create figure and subplots
     fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(8, 10), sharex=True)
@@ -29,13 +37,16 @@ def plot_trial_list(trial_list, title=None, show_outliers=False, just_outliers=F
         # Determine color and alpha based on outlier status and show_outliers flag
         if show_outliers:
             if trial_df.is_outlier() and not just_outliers:
-                color = 'red'
+                if trial_df.is_corrected_outlier():
+                    color = 'green'
+                else: 
+                    color = 'red'
                 alpha = 0.7
             elif trial_df.is_outlier() and just_outliers:
                 if trial_df.is_corrected_outlier():
                     color = 'green'
                 else: 
-                    color = 'orange'
+                    color = 'red'
                 alpha = 0.5
             else:
                 color = 'gray'
@@ -92,16 +103,24 @@ def plot_trial_list(trial_list, title=None, show_outliers=False, just_outliers=F
     ax5.grid(True)
 
     plt.tight_layout()
+    
+    # Save figure if requested
+    if save_fig and save_path:
+        plt.savefig(save_path)
+        
     return fig, (ax1, ax2, ax3, ax4, ax5)
 
 
-def plot_calibration_results_for_batch_and_individual(calibration_results, trial_list): 
+def plot_calibration_results_for_batch_and_individual(calibration_results, trial_list, title=None, save_fig=False, save_path=None): 
     """
     Plot the calibration results for a batch of trials and individual trials.
 
     Args:
         calibration_results (dict): Dictionary containing batch calibration results for each grip force threshold
         trial_list (list): List of CalibrationTrial objects to plot individual results for
+        title (str, optional): Title for the figure
+        save_fig (bool, optional): Whether to save the figure
+        save_path (str, optional): Path to save the figure if save_fig is True
 
     Returns:
         fig: The matplotlib figure object
@@ -109,6 +128,9 @@ def plot_calibration_results_for_batch_and_individual(calibration_results, trial
     """
     # Create figure with 3 subplots
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10), sharex=True)
+    
+    if title:
+        fig.suptitle(title)
     
     # Plot batch results
     grip_thresholds = np.array(list(calibration_results['by_grip_force_threshold'].keys()))
@@ -152,10 +174,15 @@ def plot_calibration_results_for_batch_and_individual(calibration_results, trial
     ax3.grid(True)
 
     plt.tight_layout()
+    
+    # Save figure if requested
+    if save_fig and save_path:
+        plt.savefig(save_path)
+        
     return fig, (ax1, ax2, ax3)
 
 
-def plot_main_load_schedule(trial_list : list[MainTrial]): 
+def plot_main_load_schedule(trial_list : list[MainTrial], title=None, save_fig=False, save_path=None): 
     """
     Plot the load schedule for a list of MainTrial objects.
     
@@ -169,12 +196,18 @@ def plot_main_load_schedule(trial_list : list[MainTrial]):
     
     Parameters:
         trial_list: List of MainTrial objects to plot
+        title: Optional title for the figure
+        save_fig: Whether to save the figure
+        save_path: Path to save the figure if save_fig is True
         
     Returns:
         fig, axes: The matplotlib figure and axes objects
     """
     # Create figure with subplots - main plot for torques and smaller plot for durations
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), height_ratios=[3, 1], gridspec_kw={'hspace': 0.3})
+    
+    if title:
+        fig.suptitle(title)
     
     # Prepare data
     trial_numbers = list(range(1, len(trial_list) + 1))
@@ -209,6 +242,7 @@ def plot_main_load_schedule(trial_list : list[MainTrial]):
     # Split data into normal and outlier trials
     normal_trials = [i for i, outlier in enumerate(is_outlier) if not outlier]
     outlier_trials = [i for i, outlier in enumerate(is_outlier) if outlier]
+    corrected_outlier_trials = [i for i, outlier in enumerate(is_outlier) if outlier and trial_list[i].is_corrected_outlier()]
     
     # Plot normal trials with line and circles
     if normal_trials:
@@ -221,6 +255,11 @@ def plot_main_load_schedule(trial_list : list[MainTrial]):
         outlier_x = [trial_numbers[i] for i in outlier_trials]
         outlier_y = [durations[i] for i in outlier_trials]
         ax2.plot(outlier_x, outlier_y, 'rx', markersize=8, markeredgewidth=2, label='Outlier Trials')
+        
+    if corrected_outlier_trials: 
+        corrected_outlier_x = [trial_numbers[i] for i in corrected_outlier_trials]
+        corrected_outlier_y = [durations[i] for i in corrected_outlier_trials]
+        ax2.plot(corrected_outlier_x, corrected_outlier_y, 'gx', markersize=8, markeredgewidth=2, label='Corrected Outlier Trials')
     
     # Add legend for duration plot
     if outlier_trials:
@@ -234,6 +273,11 @@ def plot_main_load_schedule(trial_list : list[MainTrial]):
     ax2.grid(True, linestyle='--', alpha=0.7)
     
     plt.tight_layout()
+    
+    # Save figure if requested
+    if save_fig and save_path:
+        plt.savefig(save_path)
+        
     return fig, (ax1, ax2)
     
 
@@ -328,7 +372,7 @@ def plot_average_trajectories_single_participant(results_dict):
     for key, trial in results_dict['main']['average_trajectories'].items(): 
         # Parse the key components
         parts = key.split('_')
-        load_value = float(parts[0])
+        load_value = parts[0]
         trial_type = parts[1]  # 'normal' or 'catch'
         visibility = parts[2]  # 'visible' or 'hidden'
         
@@ -339,7 +383,7 @@ def plot_average_trajectories_single_participant(results_dict):
         marker = 'o' if visibility == 'visible' else 'x'
         
         # We'll use markevery to avoid cluttering the plot with too many markers
-        markevery = 20
+        markevery = 10
         
         # Create a custom line for each trial with appropriate styling
         line1, = ax1.plot(trial['elapsed_time'], trial['EncoderRadians_smooth'], linestyle=linestyle, marker=marker, markevery=markevery)
@@ -383,6 +427,125 @@ def plot_average_trajectories_single_participant(results_dict):
     legend_ax.legend(lines, labels, loc='center', fontsize='large')
     
     plt.tight_layout()
+    
+    return fig
+
+
+def plot_average_trajectories_single_participant_for_paper(results_dict, title=None, save_fig=False, save_path=None): 
+    """
+    Plot the average trajectories for a single participant, focusing on position and grip force
+    for specific load conditions.
+    
+    Creates a 2x3 grid of subplots showing:
+    1. Heavy load (0.5): catch vs. non-catch position
+    2. Light load (0.1): catch vs. non-catch position
+    3. Medium load (0.3): first catch vs. other catch (hidden) position
+    4. Heavy load (0.5): catch vs. non-catch grip force
+    5. Light load (0.1): catch vs. non-catch grip force
+    6. Medium load (0.3): first catch vs. other catch (hidden) grip force
+    
+    Args:
+        results_dict: Dictionary containing the results for a single participant
+        title: Optional title for the figure
+        save_fig: Whether to save the figure
+        save_path: Path to save the figure if save_fig is True
+        
+    Returns:
+        fig: The matplotlib figure object
+    """
+    
+    # Create a 2x3 grid
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    
+    if title:
+        fig.suptitle(title)
+    
+    # Define the specific cases we want to plot
+    cases = {
+        'heavy': {
+            'Heavy Normal': '0.5_normal_hidden',
+            'Heavy Catch': '0.5_catch_hidden'
+        },
+        'light': {
+            'Light Normal': '0.1_normal_hidden',
+            'Light Catch': '0.1_catch_hidden'
+        },
+        'medium': {
+            'First Medium Visible': 'first_medium_catch_visible',
+            'Avg Medium Catch': '0.3_catch_hidden'
+        }
+    }
+    
+    # Define line styles and colors
+    styles = {
+        'Heavy Normal': {'linestyle': 'solid', 'color': 'blue', 'label': 'Heavy Normal'},
+        'Heavy Catch': {'linestyle': 'dotted', 'color': 'red', 'label': 'Heavy Catch'},
+        'Light Normal': {'linestyle': 'solid', 'color': 'green', 'label': 'Light Normal'},
+        'Light Catch': {'linestyle': 'dotted', 'color': 'purple', 'label': 'Light Catch'},
+        'First Medium Visible': {'linestyle': 'solid', 'color': 'orange', 'label': 'First Medium Visible'},
+        'Avg Medium Catch': {'linestyle': 'dotted', 'color': 'brown', 'label': 'Avg Medium Catch'}
+    }
+    
+    # Plot position data (top row)
+    for col, load_type in enumerate(['heavy', 'light', 'medium']):
+        ax = axes[0, col]
+        
+        for trial_type, key in cases[load_type].items():
+            if key in results_dict['main']['average_trajectories']:
+                trial = results_dict['main']['average_trajectories'][key]
+                ax.plot(trial['elapsed_time'], trial['EncoderRadians_smooth'], 
+                       color=styles[trial_type]['color'],
+                       linestyle=styles[trial_type]['linestyle'],
+                       label=styles[trial_type]['label'])
+        
+        ax.set_xlim(0, 0.5)
+        ax.set_ylabel('Position (rad)' if col == 0 else '')
+        ax.set_title(f'{load_type.capitalize()} Load Position')
+        ax.grid(True)
+        ax.legend()
+    
+    # Plot grip force data (bottom row)
+    for col, load_type in enumerate(['heavy', 'light', 'medium']):
+        ax = axes[1, col]
+        
+        for trial_type, key in cases[load_type].items():
+            if key in results_dict['main']['average_trajectories']:
+                trial = results_dict['main']['average_trajectories'][key]
+                ax.plot(trial['elapsed_time'], trial['GripForce'], 
+                       color=styles[trial_type]['color'],
+                       linestyle=styles[trial_type]['linestyle'],
+                       label=styles[trial_type]['label'])
+        
+        ax.set_xlim(0, 0.5)
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Grip Force (N)' if col == 0 else '')
+        ax.set_title(f'{load_type.capitalize()} Load Grip Force')
+        ax.grid(True)
+        ax.legend()
+        
+    # Add semi-transparent green region to show target area (60 degrees +/- 8 degrees)
+    # Convert degrees to radians: 60 degrees = π/3 radians, 8 degrees = π/22.5 radians
+    target_center = np.deg2rad(60)  # 60 degrees in radians
+    target_range = np.deg2rad(8)  # 8 degrees in radians
+    
+    # Add the target region to each position plot in the top row
+    for col in range(3):
+        ax = axes[0, col]
+        # Add semi-transparent green rectangle spanning the full x-axis range
+        # with y-axis range from (target_center - target_range) to (target_center + target_range)
+        ax.axhspan(
+            target_center - target_range, 
+            target_center + target_range, 
+            color='green', 
+            alpha=0.2, 
+            label='Target Region'
+        )
+    
+    plt.tight_layout()
+    
+    # Save figure if requested
+    if save_fig and save_path:
+        plt.savefig(save_path)
     
     return fig
     
@@ -1079,10 +1242,20 @@ def plot_main_trial_position_and_grip(results, participant, output_dir=None):
     
     plt.show()
 
-def plot_virtual_trajectories_for_paper(results, participant, output_dir=None): 
+def plot_virtual_trajectories_for_paper(results, participant, output_dir=None, title=None, save_fig=False, save_path=None): 
     """
     Plot the virtual trajectories for a given participant. 
     
+    Args:
+        results: Dictionary containing all participant results
+        participant: Participant ID
+        output_dir: Directory to save output files (optional)
+        title: Optional title for the figure
+        save_fig: Whether to save the figure
+        save_path: Path to save the figure if save_fig is True
+        
+    Returns:
+        None
     """
     
     # To do this, first we need to get the impedance v.s. grip force threshold data, as calculated in. 
@@ -1397,6 +1570,28 @@ def plot_virtual_trajectories_for_paper(results, participant, output_dir=None):
     vaf_light_heavy = 1 - np.sum(np.abs(avg_pos_light_heavy[:idx_100ms] - theta_light_heavy.y[0][:idx_100ms])**2)/np.sum(np.abs(avg_pos_light_heavy[:idx_100ms])**2)
     
     print(f"VAF Heavy->Light: {vaf_heavy_light*100:.2f}%, VAF Light->Heavy: {vaf_light_heavy*100:.2f}%")
+    
+    # Save figures if requested
+    if save_fig and save_path:
+        # Create a directory for the figures if it doesn't exist
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
+        # Save each figure with a unique name
+        if output_dir:
+            fig1.savefig(os.path.join(output_dir, 'virtual_trajectories_control_input.png'))
+            fig2.savefig(os.path.join(output_dir, 'virtual_trajectories_wheel_position.png'))
+            fig3.savefig(os.path.join(output_dir, 'virtual_trajectories_grip_force.png'))
+            fig4.savefig(os.path.join(output_dir, 'virtual_trajectories_heavy_light_catch.png'))
+            fig5.savefig(os.path.join(output_dir, 'virtual_trajectories_light_heavy_catch.png'))
+        else:
+            # If no output_dir is provided, use the save_path as a base and add suffixes
+            base_path = os.path.splitext(save_path)[0]
+            fig1.savefig(f"{base_path}_control_input.png")
+            fig2.savefig(f"{base_path}_wheel_position.png")
+            fig3.savefig(f"{base_path}_grip_force.png")
+            fig4.savefig(f"{base_path}_heavy_light_catch.png")
+            fig5.savefig(f"{base_path}_light_heavy_catch.png")
     
     plt.show()
 
