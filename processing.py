@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np 
 import json
 from scipy.signal import savgol_filter 
+from scipy.integrate import cumulative_trapezoid, solve_ivp
 from TrialData import CalibrationTrial, MainTrial
 from typing import List
 import matplotlib.pyplot as plt
@@ -150,6 +151,133 @@ def estimate_average_trajectories_single_participant(results_dict, task: str, us
             results_dict['main']['average_trajectories'][key] = average_trial
             
     return results_dict
+
+    
+def estimate_virtual_trajectories_single_participant(results_dict, use_corrected_outliers: bool = False): 
+    """
+    Estimate the virtual spring trajectories for a single participant. 
+    To do this, we need their calibration results. We are going to set up some IVPs to estimate the virtual trajectory. 
+    """
+    
+    inertia_slope = results_dict['calibration']['results']['linear_fits']['inertia']['slope']
+    inertia_intercept = results_dict['calibration']['results']['linear_fits']['inertia']['intercept']
+    damping_slope = results_dict['calibration']['results']['linear_fits']['damping']['slope']
+    damping_intercept = results_dict['calibration']['results']['linear_fits']['damping']['intercept']
+    stiffness_slope = results_dict['calibration']['results']['linear_fits']['stiffness']['slope']
+    stiffness_intercept = results_dict['calibration']['results']['linear_fits']['stiffness']['intercept']
+    
+    # Define the phi_dot function for use with solve_ivp
+    def phi_dot_ivp(t, y, theta, theta_dot, theta_ddot, grip_force, load):
+        J = inertia_intercept + inertia_slope * grip_force
+        b = damping_intercept + damping_slope * grip_force
+        k = stiffness_intercept + stiffness_slope * grip_force
+        
+        # Use y[0] (phi) instead of theta in the first term
+        return -(k/b) * y[0] + (1/b) * (k*theta + b*theta_dot + J*theta_ddot + load)
+    
+    for trial in results_dict['main']['runs']: 
+        if trial.is_outlier() and not trial.is_corrected_outlier(): 
+            continue 
+        
+        if use_corrected_outliers or not trial.is_outlier(): 
+            # Extract data from the trial
+            theta = trial['EncoderRadians_smooth'].to_numpy()
+            theta_dot = trial['EncoderRadians_dot_smooth'].to_numpy()
+            theta_ddot = trial['EncoderRadians_ddot_smooth'].to_numpy()
+            grip_force = trial['GripForce'].to_numpy()
+            load = np.clip(theta * trial.get_load() / 0.1, 0, trial.get_load())
+            time = trial['elapsed_time'].to_numpy()
+            
+            # Create a wrapper function for solve_ivp that interpolates the trial data
+            def phi_dot_wrapper(t, y):
+                # Find the closest time index
+                idx = np.argmin(np.abs(time - t))
+                return phi_dot_ivp(t, y, theta[idx], theta_dot[idx], theta_ddot[idx], 
+                                  grip_force[idx], load[idx])
+            
+            # Solve the IVP
+            solution = solve_ivp(phi_dot_wrapper, [time[0], time[-1]], [0], 
+                                t_eval=time, method='RK45')
+            
+            # Extract the solution
+            virtual_trajectory = solution.y[0]
+            
+            # Calculate phi_dot for each time point
+            virtual_trajectory_dot = np.array([phi_dot_wrapper(t, [phi]) for t, phi in zip(time, virtual_trajectory)])
+            
+            # Add both to the dataframe
+            trial['VirtualTrajectory_Dot'] = virtual_trajectory_dot
+            trial['VirtualTrajectory'] = virtual_trajectory
+            
+    return results_dict
+
+def calculate_single_virtual_trajectory(results_dict: dict, df: pd.DataFrame, load_value: float): 
+    """Calculate the virtual trajectory for a single trial. 
+    """
+    
+    inertia_slope = results_dict['calibration']['results']['linear_fits']['inertia']['slope']
+    inertia_intercept = results_dict['calibration']['results']['linear_fits']['inertia']['intercept']
+    damping_slope = results_dict['calibration']['results']['linear_fits']['damping']['slope']
+    damping_intercept = results_dict['calibration']['results']['linear_fits']['damping']['intercept']
+    stiffness_slope = results_dict['calibration']['results']['linear_fits']['stiffness']['slope']
+    stiffness_intercept = results_dict['calibration']['results']['linear_fits']['stiffness']['intercept']
+    
+    # Define the phi_dot function for use with solve_ivp
+    def phi_dot_ivp(t, y, theta, theta_dot, theta_ddot, grip_force, load):
+        J = inertia_intercept + inertia_slope * grip_force
+        b = damping_intercept + damping_slope * grip_force
+        k = stiffness_intercept + stiffness_slope * grip_force
+        
+        # Use y[0] (phi) instead of theta in the first term
+        return -(k/b) * y[0] + (1/b) * (k*theta + b*theta_dot + J*theta_ddot + load)
+    
+    # Extract data from the trial
+    theta = df['EncoderRadians_smooth'].to_numpy()
+    theta_dot = df['EncoderRadians_dot_smooth'].to_numpy()
+    theta_ddot = df['EncoderRadians_ddot_smooth'].to_numpy()
+    grip_force = df['GripForce'].to_numpy()
+    load = np.clip(theta * load_value / 0.1, 0, load_value)
+    time = df['elapsed_time'].to_numpy()
+    
+    # Create a wrapper function for solve_ivp that interpolates the trial data
+    def phi_dot_wrapper(t, y):
+        # Find the closest time index
+        idx = np.argmin(np.abs(time - t))
+        return phi_dot_ivp(t, y, theta[idx], theta_dot[idx], theta_ddot[idx], 
+                          grip_force[idx], load[idx])
+        
+    # Solve the IVP
+    solution = solve_ivp(phi_dot_wrapper, [time[0], time[-1]], [0], 
+                        t_eval=time, method='RK45')
+    
+    # Extract the solution
+    virtual_trajectory = solution.y[0]
+    virtual_trajectory_dot = np.array([phi_dot_wrapper(t, [phi]) for t, phi in zip(time, virtual_trajectory)])
+    
+    return virtual_trajectory, virtual_trajectory_dot
+    
+def estimate_scaling_factors_single_participant(results_dict): 
+    """
+    Estimate the scaling factors for a single participant. What this means is that we are going to form a few optimization problems. 
+    We want to find the parameter alpha that best describes the relationship between the grip force during a light trial and the grip force during a medium trial. 
+    We want to find the parameter beta that best describes the relationship between the grip force during a heavy trial and the grip force during a medium trial. 
+    We want to find the parameter gamma that best describes the relationship between the virtual trajectory during a light trial and the virtual trajectory during a medium trial
+    We want to find the parameter eta that best describes the relationship between the virtual trajectory during a heavy trial and the virtual trajectory during a medium trial. 
+    
+    For heavy/light trials, we are going to use the averages. 
+    """
+    
+    light_trajectory = results_dict['main']['average_trajectories']['0.1_normal_visible']
+    heavy_trajectory = results_dict['main']['average_trajectories']['0.5_normal_visible']
+    medium_trajectory = results_dict['main']['average_trajectories']['0.3_normal_visible']
+    
+    
+    
+    
+    
+    
+    
+            
                     
 
 ### NEW - MAR 28 2025

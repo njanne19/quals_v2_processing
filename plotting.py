@@ -548,8 +548,408 @@ def plot_average_trajectories_single_participant_for_paper(results_dict, title=N
         plt.savefig(save_path)
     
     return fig
+
     
+def plot_learning_curves(results_dict, title=None, save_fig=False, save_path=None): 
+    """
+    Plot the learning curves for a single participant. Generate two scatter plots, one for heavy load, one for light load. 
+    On the scatter plot, we want 0-90 rise time v.s. trial number. 
+    """
     
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5))
+    
+    # First calculate the 0-90 rise time for the first 10 trials for each load condition
+    light_load_0_90_rise_times = []
+    heavy_load_0_90_rise_times = []
+    
+    for trial in results_dict['main']['runs']: 
+        if len(light_load_0_90_rise_times) >= 10 and len(heavy_load_0_90_rise_times) >= 10: 
+            break
+        
+        if trial.is_load_visible(): 
+            position_over_threshold = trial[trial['EncoderRadians_smooth'] > 0.9]
+            if not position_over_threshold.empty:
+                rise_time = position_over_threshold['elapsed_time'].iloc[0]
+            else:
+                rise_time = np.nan
+            
+            if trial.get_load() == 0.1: 
+                light_load_0_90_rise_times.append(rise_time)
+            elif trial.get_load() == 0.5: 
+                heavy_load_0_90_rise_times.append(rise_time)
+    
+    # Now plot the data. Want rise times on y axis, trial number on x axis
+    ax1.scatter(range(len(light_load_0_90_rise_times)), light_load_0_90_rise_times)
+    ax2.scatter(range(len(heavy_load_0_90_rise_times)), heavy_load_0_90_rise_times)
+    
+    ax1.set_xlabel('Trial Number')
+    ax1.set_ylabel('0-90 Rise Time (s)')
+    ax1.set_title('Light Load (0.1)')
+    ax1.grid(True)
+    
+    ax2.set_xlabel('Trial Number')
+    ax2.set_ylabel('0-90 Rise Time (s)')
+    ax2.set_title('Heavy Load (0.5)')
+    ax2.grid(True)
+    
+    if title: 
+        fig.suptitle(title)
+    
+    if save_fig and save_path: 
+        plt.savefig(save_path)
+    
+    return fig
+
+
+def plot_learning_curves_group(results_dict, title=None, save_fig=False, save_path=None): 
+    """
+    Plot the learning curves for a group of participants. Generate two scatter plots, one for heavy load, one for light load. 
+    On the scatter plot, we want 0-90 rise time v.s. trial number for each participant with different colors.
+    
+    Args:
+        results_dict (dict): Dictionary with participant IDs as keys and their results as values
+        title (str, optional): Title for the plot
+        save_fig (bool, optional): Whether to save the figure
+        save_path (str, optional): Path to save the figure
+    """
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 14))
+    
+    # Create a colormap for different participants
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(results_dict)))
+    
+    # Lists to collect all data points for exponential fitting
+    all_light_trials = []
+    all_light_times = []
+    all_heavy_trials = []
+    all_heavy_times = []
+    
+    # Process each participant's data
+    for i, (participant, participant_data) in enumerate(results_dict.items()):
+        # Calculate the 0-90 rise time for exactly the first 10 trials for each load condition
+        light_load_0_90_rise_times = []
+        heavy_load_0_90_rise_times = []
+        light_trial_count = 0
+        heavy_trial_count = 0
+        
+        for trial in participant_data['main']['runs']:
+            if light_trial_count >= 10 and heavy_trial_count >= 10:
+                break
+            
+            if trial.is_load_visible():
+                position_over_threshold = trial[trial['EncoderRadians_smooth'] > 0.9]
+                if not position_over_threshold.empty:
+                    rise_time = position_over_threshold['elapsed_time'].iloc[0]
+                else:
+                    rise_time = np.nan
+                
+                if trial.get_load() == 0.1 and light_trial_count < 10:
+                    light_load_0_90_rise_times.append(rise_time)
+                    if not np.isnan(rise_time):
+                        all_light_trials.append(light_trial_count)
+                        all_light_times.append(rise_time)
+                    light_trial_count += 1
+                elif trial.get_load() == 0.5 and heavy_trial_count < 10:
+                    heavy_load_0_90_rise_times.append(rise_time)
+                    if not np.isnan(rise_time):
+                        all_heavy_trials.append(heavy_trial_count)
+                        all_heavy_times.append(rise_time)
+                    heavy_trial_count += 1
+        
+        # Plot the data for this participant with a unique color - scatter points only
+        ax1.scatter(range(len(light_load_0_90_rise_times)), light_load_0_90_rise_times, 
+                   color=colors[i], alpha=0.8, s=100)
+        
+        ax2.scatter(range(len(heavy_load_0_90_rise_times)), heavy_load_0_90_rise_times, 
+                   color=colors[i], alpha=0.8, s=100)
+    
+    # Fit exponential decay to the data: y = a * exp(-b * x) + c
+    def exp_decay(x, a, b, c):
+        return a * np.exp(-b * x) + c
+    
+    from scipy.optimize import curve_fit
+    
+    # Fit light load data
+    if all_light_trials and all_light_times:
+        try:
+            light_params, _ = curve_fit(exp_decay, all_light_trials, all_light_times, 
+                                       p0=[1.0, 0.5, 0.5], maxfev=10000)
+            
+            # Generate smooth curve for plotting
+            x_smooth = np.linspace(0, 9, 100)
+            y_smooth = exp_decay(x_smooth, *light_params)
+            
+            # Plot the fitted curve with black dotted line
+            ax1.plot(x_smooth, y_smooth, 'k--', linewidth=3, 
+                    label=f"Fit: {light_params[0]:.2f} * exp(-{light_params[1]:.2f} * x) + {light_params[2]:.2f}")
+            
+            # Add legend
+            ax1.legend(fontsize=12, loc='upper right')
+        except:
+            pass
+    
+    # Fit heavy load data
+    if all_heavy_trials and all_heavy_times:
+        try:
+            heavy_params, _ = curve_fit(exp_decay, all_heavy_trials, all_heavy_times, 
+                                       p0=[1.0, 0.5, 0.5], maxfev=10000)
+            
+            # Generate smooth curve for plotting
+            x_smooth = np.linspace(0, 9, 100)
+            y_smooth = exp_decay(x_smooth, *heavy_params)
+            
+            # Plot the fitted curve with black dotted line
+            ax2.plot(x_smooth, y_smooth, 'k--', linewidth=3,
+                    label=f"Fit: {heavy_params[0]:.2f} * exp(-{heavy_params[1]:.2f} * x) + {heavy_params[2]:.2f}")
+            
+            # Add legend
+            ax2.legend(fontsize=12, loc='upper right')
+        except:
+            pass
+    
+    # Add labels with larger, bolder text
+    ax1.set_xlabel('Trial Number', fontsize=16, fontweight='bold')
+    ax1.set_ylabel('0-90 Rise Time (s)', fontsize=16, fontweight='bold')
+    ax1.set_title('Light Load (0.1N-m) Rise Time Adaptation', fontsize=18, fontweight='bold')
+    ax1.tick_params(axis='both', which='major', labelsize=14)
+    ax1.grid(True)
+    
+    ax2.set_xlabel('Trial Number', fontsize=16, fontweight='bold')
+    ax2.set_ylabel('0-90 Rise Time (s)', fontsize=16, fontweight='bold')
+    ax2.set_title('Heavy Load (0.5N-m) Rise Time Adaptation', fontsize=18, fontweight='bold')
+    ax2.tick_params(axis='both', which='major', labelsize=14)
+    ax2.grid(True)
+    
+    if title: 
+        fig.suptitle(title, fontsize=20, fontweight='bold')
+    
+    plt.tight_layout(pad=3.0)  # Increase padding between subplots
+    
+    if save_fig and save_path: 
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    return fig
+
+    
+def plot_medium_adaptation(results_dict, title=None, save_fig=False, save_path=None): 
+    """
+    Plot the medium adaptation for a single participant. We are going to create a (3, 2) grid of subplots. 
+    The left column shows position, grip force, and velocity timeseries for the last few trials 
+    before the first visible medium is encountered and the first visible medium trial.
+    The right column shows the corresponding virtual trajectories and velocities.
+    """
+    
+    # Increase font size for all text elements
+    plt.rcParams.update({'font.size': 14, 'font.weight': 'bold'})
+    
+    # Create figure with custom gridspec to handle different number of plots in each column
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1, 0.3, 0.3])
+    
+    # Create axes for left column (3 plots)
+    ax_pos = fig.add_subplot(gs[0, 0])
+    ax_grip = fig.add_subplot(gs[1, 0])
+    ax_vel = fig.add_subplot(gs[2, 0])
+    
+    # Create axes for right column (2 plots that span the same height as the left column)
+    ax_vpos = fig.add_subplot(gs[0:2, 1])  # Virtual position spans top 2/3
+    ax_vvel = fig.add_subplot(gs[2, 1])    # Virtual velocity takes bottom 1/3
+    
+    # First, we need to find the last few trials before the first visible medium is encountered
+    # and the first medium trial
+    first_medium_trial = None
+    last_trials_before_medium = []
+    num_trials_to_average = 3  # Number of trials to average before medium
+    
+    for i, trial in enumerate(results_dict['main']['runs']):
+        if trial.is_load_visible() and trial.get_load() == 0.3: 
+            first_medium_trial = results_dict['main']['runs'][i]
+            # Get the last few trials before medium
+            for j in range(1, num_trials_to_average + 1):
+                if i - j >= 0:  # Make sure we don't go out of bounds
+                    last_trials_before_medium.append(results_dict['main']['runs'][i-j])
+            break
+    
+    # Plot position data (left column)
+    for i, trial in enumerate(last_trials_before_medium):
+        # Convert numerical load to text
+        load_text = "Light" if trial.get_load() == 0.1 else "Heavy" if trial.get_load() == 0.5 else f"{trial.get_load()}"
+        load_label = f"Before Medium (Load: {load_text})" if i == 0 else None
+        ax_pos.plot(trial['elapsed_time'], trial['EncoderRadians_smooth'], 
+                 alpha=0.5, color='grey', label=load_label, linewidth=3)
+    
+    ax_pos.plot(first_medium_trial['elapsed_time'], first_medium_trial['EncoderRadians_smooth'], 
+             color='green', linewidth=4, label='First Medium Trial')
+    ax_pos.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
+    ax_pos.set_ylabel('Position (rad)', fontweight='bold', fontsize=14)
+    ax_pos.legend(fontsize=12, prop={'weight': 'bold'})
+    ax_pos.grid(True)
+    ax_pos.tick_params(labelsize=12)
+    
+    # Plot grip force timeseries (left column)
+    for i, trial in enumerate(last_trials_before_medium):
+        ax_grip.plot(trial['elapsed_time'], trial['GripForce'], 
+                 alpha=0.5, color='grey', label='Before Medium' if i == 0 else None, linewidth=3)
+    
+    ax_grip.plot(first_medium_trial['elapsed_time'], first_medium_trial['GripForce'], 
+             color='green', linewidth=4, label='First Medium Trial')
+    ax_grip.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
+    ax_grip.set_ylabel('Grip Force (N)', fontweight='bold', fontsize=14)
+    ax_grip.legend(fontsize=12, prop={'weight': 'bold'})
+    ax_grip.grid(True)
+    ax_grip.tick_params(labelsize=12)
+    
+    # Plot velocity timeseries (left column)
+    for i, trial in enumerate(last_trials_before_medium):
+        ax_vel.plot(trial['elapsed_time'], trial['EncoderRadians_dot_smooth'], 
+                 alpha=0.5, color='grey', label='Before Medium' if i == 0 else None, linewidth=3)
+    
+    ax_vel.plot(first_medium_trial['elapsed_time'], first_medium_trial['EncoderRadians_dot_smooth'], 
+             color='green', linewidth=4, label='First Medium Trial')
+    ax_vel.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
+    ax_vel.set_ylabel('Velocity (rad/s)', fontweight='bold', fontsize=14)
+    ax_vel.legend(fontsize=12, prop={'weight': 'bold'})
+    ax_vel.grid(True)
+    ax_vel.tick_params(labelsize=12)
+    
+    # Plot virtual trajectories (right column)
+    # Check if virtual trajectories have been calculated
+    has_virtual_trajectories = all('VirtualTrajectory' in trial.columns for trial in last_trials_before_medium + [first_medium_trial])
+    
+    if has_virtual_trajectories:
+        # Plot virtual position (right column, top)
+        for i, trial in enumerate(last_trials_before_medium):
+            load_text = "Light" if trial.get_load() == 0.1 else "Heavy" if trial.get_load() == 0.5 else f"{trial.get_load()}"
+            load_label = f"Before Medium (Load: {load_text})" if i == 0 else None
+            ax_vpos.plot(trial['elapsed_time'], trial['VirtualTrajectory'], 
+                     alpha=0.5, color='grey', label=load_label, linewidth=3)
+        
+        ax_vpos.plot(first_medium_trial['elapsed_time'], first_medium_trial['VirtualTrajectory'], 
+                 color='green', linewidth=4, label='First Medium Trial')
+        ax_vpos.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
+        ax_vpos.set_ylabel('Virtual Position (rad)', fontweight='bold', fontsize=14)
+        ax_vpos.legend(fontsize=12, prop={'weight': 'bold'})
+        ax_vpos.grid(True)
+        ax_vpos.tick_params(labelsize=12)
+        
+        # Plot virtual velocity (right column, bottom)
+        for i, trial in enumerate(last_trials_before_medium):
+            ax_vvel.plot(trial['elapsed_time'], trial['VirtualTrajectory_Dot'], 
+                     alpha=0.5, color='grey', label='Before Medium' if i == 0 else None, linewidth=3)
+        
+        ax_vvel.plot(first_medium_trial['elapsed_time'], first_medium_trial['VirtualTrajectory_Dot'], 
+                 color='green', linewidth=4, label='First Medium Trial')
+        ax_vvel.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
+        ax_vvel.set_ylabel('Virtual Velocity (rad/s)', fontweight='bold', fontsize=14)
+        ax_vvel.legend(fontsize=12, prop={'weight': 'bold'})
+        ax_vvel.grid(True)
+        ax_vvel.tick_params(labelsize=12)
+    else:
+        # If virtual trajectories haven't been calculated, display a message
+        ax_vpos.text(0.5, 0.5, 'Virtual trajectories not calculated', 
+                  horizontalalignment='center', verticalalignment='center',
+                  transform=ax_vpos.transAxes, fontsize=14, fontweight='bold')
+        ax_vpos.set_xticks([])
+        ax_vpos.set_yticks([])
+        
+        ax_vvel.text(0.5, 0.5, 'Virtual velocities not calculated', 
+                  horizontalalignment='center', verticalalignment='center',
+                  transform=ax_vvel.transAxes, fontsize=14, fontweight='bold')
+        ax_vvel.set_xticks([])
+        ax_vvel.set_yticks([])
+    
+    # Add a title indicating the load types of the trials before medium
+    load_types = []
+    for trial in last_trials_before_medium:
+        load_value = trial.get_load()
+        if load_value == 0.1:
+            load_types.append("Light")
+        elif load_value == 0.5:
+            load_types.append("Heavy")
+        else:
+            load_types.append(f"{load_value}")
+    
+    load_info = f"Loads before medium: {', '.join(load_types)}"
+    if title:
+        plt.suptitle(f"{title}\n{load_info}", fontsize=16, fontweight='bold')
+    else:
+        plt.suptitle(load_info, fontsize=16, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    if save_fig and save_path: 
+        plt.savefig(save_path, dpi=300)
+    
+    # Reset font parameters to default after creating this plot
+    plt.rcParams.update({'font.size': plt.rcParamsDefault['font.size'], 
+                         'font.weight': plt.rcParamsDefault['font.weight']})
+    
+    return fig
+
+def plot_medium_model_trajectories(results_dict, title=None, save_fig=False, save_path=None): 
+    """
+        We are going to create a 2x3 grid of subplots. First row is position, the second row is velocity. 
+        We are going to plot the average trajectories for position and grip for heavy and light loads in columns 1 and 2. 
+        We are going to do the same for column 3, though only for the first visible medium trial. 
+        This is for a single participant.
+    """
+    
+    # Create a 2x3 grid of subplots (2 rows, 3 columns)
+    fig, axes = plt.subplots(2, 3, figsize=(16, 12))
+    
+    # Unpack axes for easier access
+    (ax_heavy_pos, ax_light_pos, ax_medium_pos), (ax_heavy_grip, ax_light_grip, ax_medium_grip) = axes
+    
+    # Get the average trajectories for different load conditions
+    average_heavy_trajectory = results_dict['main']['average_trajectories']['0.5_normal_visible']
+    average_light_trajectory = results_dict['main']['average_trajectories']['0.1_normal_visible']
+    medium_trajectory = results_dict['main']['average_trajectories']['first_medium_catch_visible']
+    
+    # Plot position data (top row)
+    ax_heavy_pos.plot(average_heavy_trajectory['elapsed_time'], average_heavy_trajectory['EncoderRadians_smooth'], 
+             label='Position', color='blue')
+    ax_heavy_pos.set_title('Heavy Load (0.5)', fontsize=14)
+    ax_heavy_pos.set_ylabel('Position (rad)', fontsize=12)
+    ax_heavy_pos.grid(True)
+    
+    ax_light_pos.plot(average_light_trajectory['elapsed_time'], average_light_trajectory['EncoderRadians_smooth'], 
+             label='Position', color='blue')
+    ax_light_pos.set_title('Light Load (0.1)', fontsize=14)
+    ax_light_pos.grid(True)
+    
+    ax_medium_pos.plot(medium_trajectory['elapsed_time'], medium_trajectory['EncoderRadians_smooth'], 
+             label='Position', color='blue')
+    ax_medium_pos.set_title('Medium Load (0.3)', fontsize=14)
+    ax_medium_pos.grid(True)
+    
+    # Plot grip force data (bottom row)
+    ax_heavy_grip.plot(average_heavy_trajectory['elapsed_time'], average_heavy_trajectory['GripForce'], 
+             label='Grip Force', color='red')
+    ax_heavy_grip.set_xlabel('Time (s)', fontsize=12)
+    ax_heavy_grip.set_ylabel('Grip Force (N)', fontsize=12)
+    ax_heavy_grip.grid(True)
+    
+    ax_light_grip.plot(average_light_trajectory['elapsed_time'], average_light_trajectory['GripForce'], 
+             label='Grip Force', color='red')
+    ax_light_grip.set_xlabel('Time (s)', fontsize=12)
+    ax_light_grip.grid(True)
+    
+    ax_medium_grip.plot(medium_trajectory['elapsed_time'], medium_trajectory['GripForce'], 
+             label='Grip Force', color='red')
+    ax_medium_grip.set_xlabel('Time (s)', fontsize=12)
+    ax_medium_grip.grid(True)
+    
+    # Add a title to the plot
+    if title:
+        fig.suptitle(title, fontsize=16, fontweight='bold')
+    
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+    
+    if save_fig and save_path: 
+        plt.savefig(save_path, dpi=300)
+    
+    return fig
     
 def plot_combined_trials(data: pd.DataFrame, live_indices: list[tuple[int, int]], output_dir: str):
     """
@@ -623,6 +1023,128 @@ def plot_combined_trials(data: pd.DataFrame, live_indices: list[tuple[int, int]]
     # Save and close
     fig.savefig(os.path.join(output_dir, 'combined.png'))
     plt.close(fig)
+
+    
+def plot_group_impedance_components(results_dict: dict, save_fig: bool, save_path: str): 
+    """
+    Plot the impedance components for the group. We generate a 2x3 subplot. The top row is inertia, damping, and stiffness components 
+    v.s. grip force threshold for each participant, with thier own colored line. The bottom row is the average of the components across participants. 
+    With standard deivations shown. 
+    """
+    
+    # Create figure with subplots - use nrows, ncols syntax to ensure proper unpacking
+    fig, axes = plt.subplots(2, 3, figsize=(10, 10))
+    # Unpack axes properly for a 2x3 grid
+    ((ax1, ax2, ax3), (ax4, ax5, ax6)) = axes
+    
+    # Set font size and weight for better visibility in PDF
+    plt.rcParams.update({'font.size': 14, 'font.weight': 'bold'})
+    
+    # Initialize arrays to store data for all participants
+    thresholds = []
+    inertias = np.empty((0, 0))
+    dampings = np.empty((0, 0))
+    stiffnesses = np.empty((0, 0))
+    
+    # Plot inertia components
+    for participant_idx, participant in enumerate(results_dict):
+        # Get the inertia, damping, and stiffness values for this participant
+        participant_results = results_dict[participant]['calibration']['results']['by_grip_force_threshold']
+        
+        # Extract grip force thresholds for this participant
+        participant_thresholds = np.array(list(participant_results.keys()))
+        
+        # If this is the first participant, initialize the arrays
+        if participant_idx == 0:
+            thresholds = participant_thresholds
+            inertias = np.zeros((len(results_dict), len(thresholds)))
+            dampings = np.zeros((len(results_dict), len(thresholds)))
+            stiffnesses = np.zeros((len(results_dict), len(thresholds)))
+        
+        # Extract values for this participant
+        for i, grip_force_threshold in enumerate(thresholds):
+            if grip_force_threshold in participant_results:
+                inertias[participant_idx, i] = participant_results[grip_force_threshold]['inertia']
+                dampings[participant_idx, i] = participant_results[grip_force_threshold]['damping']
+                stiffnesses[participant_idx, i] = participant_results[grip_force_threshold]['stiffness']
+        
+        # Use thicker lines and larger markers for better visibility
+        ax1.scatter(thresholds, inertias[participant_idx], s=80)
+        ax1.plot(thresholds, inertias[participant_idx], '-', linewidth=2.5)
+        ax2.scatter(thresholds, dampings[participant_idx], s=80)
+        ax2.plot(thresholds, dampings[participant_idx], '-', linewidth=2.5)
+        ax3.scatter(thresholds, stiffnesses[participant_idx], s=80)
+        ax3.plot(thresholds, stiffnesses[participant_idx], '-', linewidth=2.5)
+
+    # Calculate averages for bottom row plots
+    inertia_means = np.mean(inertias, axis=0)
+    inertia_stds = np.std(inertias, axis=0)
+    damping_means = np.mean(dampings, axis=0)
+    damping_stds = np.std(dampings, axis=0)
+    stiffness_means = np.mean(stiffnesses, axis=0)
+    stiffness_stds = np.std(stiffnesses, axis=0)
+    
+    # Plot average inertia with error bars in bottom row - thicker lines and larger markers
+    ax4.errorbar(thresholds, inertia_means, yerr=inertia_stds, fmt='-o', 
+                 capsize=8, label='Average Inertia', ecolor='gray', 
+                 linewidth=3, markersize=10)
+    
+    # Plot average damping with error bars in bottom row
+    ax5.errorbar(thresholds, damping_means, yerr=damping_stds, fmt='-o', 
+                 capsize=8, label='Average Damping', ecolor='gray',
+                 linewidth=3, markersize=10)
+    
+    # Plot average stiffness with error bars in bottom row
+    ax6.errorbar(thresholds, stiffness_means, yerr=stiffness_stds, fmt='-o', 
+                 capsize=8, label='Average Stiffness', ecolor='gray',
+                 linewidth=3, markersize=10)
+            
+    # Set labels and titles with larger, bolder font
+    for ax in [ax1, ax2, ax3, ax4, ax5, ax6]:
+        ax.tick_params(axis='both', which='major', labelsize=12)
+        ax.grid(True, linewidth=1.5)
+        for spine in ax.spines.values():
+            spine.set_linewidth(2)
+    
+    ax1.set_xlabel('Grip Force Threshold (N)', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Inertia (kg*m²)', fontsize=14, fontweight='bold')
+    ax1.set_title('Individual Inertia', fontsize=16, fontweight='bold')
+    
+    ax2.set_xlabel('Grip Force Threshold (N)', fontsize=14, fontweight='bold')
+    ax2.set_ylabel('Damping (Nm*s/rad)', fontsize=14, fontweight='bold')
+    ax2.set_title('Individual Damping', fontsize=16, fontweight='bold')
+    
+    ax3.set_xlabel('Grip Force Threshold (N)', fontsize=14, fontweight='bold')
+    ax3.set_ylabel('Stiffness (Nm/rad)', fontsize=14, fontweight='bold')
+    ax3.set_title('Individual Stiffness', fontsize=16, fontweight='bold')
+    
+    ax4.set_xlabel('Grip Force Threshold (N)', fontsize=14, fontweight='bold')
+    ax4.set_ylabel('Inertia (kg*m²)', fontsize=14, fontweight='bold')
+    ax4.set_title('Average Inertia', fontsize=16, fontweight='bold')
+    
+    ax5.set_xlabel('Grip Force Threshold (N)', fontsize=14, fontweight='bold')
+    ax5.set_ylabel('Damping (Nm*s/rad)', fontsize=14, fontweight='bold')
+    ax5.set_title('Average Damping', fontsize=16, fontweight='bold')
+    
+    ax6.set_xlabel('Grip Force Threshold (N)', fontsize=14, fontweight='bold')
+    ax6.set_ylabel('Stiffness (Nm/rad)', fontsize=14, fontweight='bold')
+    ax6.set_title('Average Stiffness', fontsize=16, fontweight='bold')
+    
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
+    
+    # Save and close
+    if save_fig: 
+        fig.savefig(save_path, dpi=300)
+        
+    # Reset font parameters to default after creating this plot
+    plt.rcParams.update({'font.size': plt.rcParamsDefault['font.size'], 
+                         'font.weight': plt.rcParamsDefault['font.weight']})
+    
+    plt.close(fig)
+    
+    return fig
+
 
 
 def plot_calibration_metrics(results: pd.DataFrame, output_dir: str): 
